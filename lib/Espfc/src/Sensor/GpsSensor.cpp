@@ -16,12 +16,20 @@ static constexpr std::array<uint16_t, 6> NMEA_MSG_OFF{
   Gps::NMEA_MSG_GSV, Gps::NMEA_MSG_RMC, Gps::NMEA_MSG_VTG,
 };
 
-static constexpr std::array<std::tuple<uint16_t, uint8_t>, 2> UBX_MSG_ON{
+// M8/M9 messages (NAV-PVT supported)
+static constexpr std::array<std::tuple<uint16_t, uint8_t>, 2> UBX_MSG_M8{
   std::make_tuple(Gps::UBX_NAV_PVT,  1u),
   std::make_tuple(Gps::UBX_NAV_SAT, 10u),
 };
 
-GpsSensor::GpsSensor(Model& model): _model(model) {}
+// M6/M7 messages (legacy, no NAV-PVT)
+static constexpr std::array<std::tuple<uint16_t, uint8_t>, 3> UBX_MSG_M6{
+  std::make_tuple(0x0102, 1u),  // NAV-POSLLH
+  std::make_tuple(0x0112, 1u),  // NAV-VELNED
+  std::make_tuple(0x0135, 10u), // NAV-SAT
+};
+
+GpsSensor::GpsSensor(Model& model): _model(model), _useLegacyMessages(false) {}
 
 int GpsSensor::begin(Device::SerialDevice* port, int baud)
 {
@@ -89,6 +97,20 @@ void GpsSensor::processNmea(uint8_t c)
     if(!_model.isModeActive(MODE_ARMED)) _model.logger.err().logln("GPS RX Frame Err");
   }
 
+  // Parse GGA sentences for position/satellites
+  if (std::strncmp(_nmeaMsg.payload, "GPGGA,", 6) == 0 || 
+      std::strncmp(_nmeaMsg.payload, "GNGGA,", 6) == 0)
+  {
+    handleNmeaGGA();
+  }
+  
+  // Parse RMC sentences for speed/heading/time
+  if (std::strncmp(_nmeaMsg.payload, "GPRMC,", 6) == 0 || 
+      std::strncmp(_nmeaMsg.payload, "GNRMC,", 6) == 0)
+  {
+    handleNmeaRMC();
+  }
+
   onMessage();
 
   _nmeaMsg = Gps::NmeaMessage();
@@ -132,35 +154,23 @@ void GpsSensor::handle()
         .txReady = 0,
         .mode = 0x08c0,     // 8N1
         .baudRate = (uint32_t)_targetBaud, // baud
-        .inProtoMask = 0x07,
-        .outProtoMask = 0x07,
+        .inProtoMask = 0x03,  // UBX + NMEA (0x01 | 0x02)
+        .outProtoMask = 0x03, // UBX + NMEA (0x01 | 0x02)
         .flags = 0,
         .resered2 = 0,
-      }, DISABLE_NMEA, DISABLE_NMEA);
+      }, GET_VERSION, GET_VERSION);  // Skip NMEA disable, go straight to version
       delay(30); // wait until transmission complete at 9600bps
       setBaud(_targetBaud);
       delay(5);
+      _model.logger.info().logln(F("GPS UBX+NMEA MODE"));
       break;
 
     case DISABLE_NMEA:
-    {
-      const Gps::UbxCfgMsg3 m{
-        .msgId = NMEA_MSG_OFF[_counter],
-        .rate = 0,
-      };
-      _counter++;
-      if (_counter < NMEA_MSG_OFF.size())
-      {
-        send(m, _state);
-      }
-      else
-      {
-        _counter = 0;
-        send(m, GET_VERSION);
-        _model.logger.info().log(F("GPS NMEA")).logln(0);
-      }
-    }
-    break;
+      // Skip disabling NMEA - we want to keep it for parsing
+      _counter = 0;
+      _state = GET_VERSION;
+      _model.logger.info().logln(F("GPS NMEA KEEP"));
+      break;
 
     case GET_VERSION:
       send(Gps::UbxMonVer{}, ENABLE_UBX);
@@ -169,18 +179,23 @@ void GpsSensor::handle()
 
     case ENABLE_UBX:
     {
+      // Determine which message set to use based on GPS version
+      const bool useM6 = _useLegacyMessages;
+      const size_t msgCount = useM6 ? UBX_MSG_M6.size() : UBX_MSG_M8.size();
+      
       const Gps::UbxCfgMsg3 m{
-        .msgId = std::get<0>(UBX_MSG_ON[_counter]),
-        .rate = std::get<1>(UBX_MSG_ON[_counter]),
+        .msgId = useM6 ? std::get<0>(UBX_MSG_M6[_counter]) : std::get<0>(UBX_MSG_M8[_counter]),
+        .rate = useM6 ? std::get<1>(UBX_MSG_M6[_counter]) : std::get<1>(UBX_MSG_M8[_counter]),
       };
+      
       _counter++;
-      if (_counter < UBX_MSG_ON.size())
+      if (_counter < msgCount)
       {
-        send(m, _state);
+        send(m, _state, _state);
       }
       else
       {
-        send(m, ENABLE_NAV5);
+        send(m, ENABLE_NAV5, ENABLE_NAV5);
         _counter = 0;
         _timeout = micros() + 10 * TIMEOUT;
         _model.logger.info().logln(F("GPS UBX"));
@@ -232,18 +247,11 @@ void GpsSensor::handle()
       break;
 
     case SET_RATE:
-    {
-      const uint16_t mRate = _currentBaud > 100000 ? 100 : 200;
-      const uint16_t nRate = 1;
-      const Gps::UbxCfgRate6 m{
-        .measRate = mRate,
-        .navRate = nRate,
-        .timeRef = 0, // utc
-      };
-      send(m, RECEIVE);
-      _model.logger.info().log(F("GPS RATE")).log(mRate).logln(nRate);
-    }
-    break;
+      // Skip rate configuration, go straight to receiving
+      _state = RECEIVE;
+      _model.state.gps.present = true;
+      _model.logger.info().logln(F("GPS START RX"));
+      break;
 
     case ERROR:
       if (_counter == 0)
@@ -277,6 +285,14 @@ void GpsSensor::handle()
         else if (_ubxMsg.isResponse(Gps::UbxNavPvt92::ID))
         {
           handleNavPvt();
+        }
+        else if (_ubxMsg.isResponse(static_cast<Gps::MsgId>(0x0102))) // NAV-POSLLH (M6/M7)
+        {
+          handleNavPosllh();
+        }
+        else if (_ubxMsg.isResponse(static_cast<Gps::MsgId>(0x0112))) // NAV-VELNED (M6/M7)
+        {
+          handleNavVelned();
         }
         else if (_ubxMsg.isResponse(Gps::UbxNavSat::ID))
         {
@@ -324,11 +340,292 @@ void GpsSensor::handleError() const
   _model.state.gps.present = false;
 }
 
+void GpsSensor::calculateHomeVector() const
+{
+  if (!_model.state.gps.homeSet || !_model.state.gps.fix) {
+    _model.state.gps.distanceToHome = 0;
+    _model.state.gps.directionToHome = 0;
+    return;
+  }
+  
+  // Calculate distance using Haversine formula
+  _model.state.gps.distanceToHome = haversineDistance(
+    _model.state.gps.home.raw.lat,
+    _model.state.gps.home.raw.lon,
+    _model.state.gps.location.raw.lat,
+    _model.state.gps.location.raw.lon
+  );
+  
+  // Calculate bearing
+  _model.state.gps.directionToHome = calculateBearing(
+    _model.state.gps.location.raw.lat,
+    _model.state.gps.location.raw.lon,
+    _model.state.gps.home.raw.lat,
+    _model.state.gps.home.raw.lon
+  );
+}
+
+float GpsSensor::haversineDistance(int32_t lat1, int32_t lon1, 
+                                    int32_t lat2, int32_t lon2)
+{
+  // Convert to radians (coordinates are in degrees * 1e7)
+  const double R = 6371000.0; // Earth radius in meters
+  
+  double phi1 = lat1 * 1e-7 * M_PI / 180.0;
+  double phi2 = lat2 * 1e-7 * M_PI / 180.0;
+  double deltaPhi = (lat2 - lat1) * 1e-7 * M_PI / 180.0;
+  double deltaLambda = (lon2 - lon1) * 1e-7 * M_PI / 180.0;
+  
+  double a = sin(deltaPhi / 2.0) * sin(deltaPhi / 2.0) +
+             cos(phi1) * cos(phi2) *
+             sin(deltaLambda / 2.0) * sin(deltaLambda / 2.0);
+  
+  double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+  
+  return R * c; // Distance in meters
+}
+
+int16_t GpsSensor::calculateBearing(int32_t lat1, int32_t lon1,
+                                     int32_t lat2, int32_t lon2)
+{
+  // Convert to radians
+  double phi1 = lat1 * 1e-7 * M_PI / 180.0;
+  double phi2 = lat2 * 1e-7 * M_PI / 180.0;
+  double deltaLambda = (lon2 - lon1) * 1e-7 * M_PI / 180.0;
+  
+  double y = sin(deltaLambda) * cos(phi2);
+  double x = cos(phi1) * sin(phi2) -
+             sin(phi1) * cos(phi2) * cos(deltaLambda);
+  
+  double theta = atan2(y, x);
+  double bearing = fmod((theta * 180.0 / M_PI + 360.0), 360.0);
+  
+  return (int16_t)bearing;
+}
+
+void GpsSensor::setHomePosition() const
+{
+  if (!_model.state.gps.fix || _model.state.gps.fixType < 2) {
+    return; // Need at least 2D fix
+  }
+  
+  if (_model.state.gps.numSats < _model.config.gps.minSats) {
+    return; // Not enough satellites
+  }
+  
+  // Set home position
+  _model.state.gps.home.raw.lat = _model.state.gps.location.raw.lat;
+  _model.state.gps.home.raw.lon = _model.state.gps.location.raw.lon;
+  _model.state.gps.home.raw.height = _model.state.gps.location.raw.height;
+  _model.state.gps.homeSet = true;
+  
+  _model.logger.info()
+    .log(F("GPS HOME SET: "))
+    .log(_model.state.gps.home.raw.lat * 1e-7f)
+    .log(F(", "))
+    .logln(_model.state.gps.home.raw.lon * 1e-7f);
+}
+
+bool GpsSensor::shouldSetHome() const
+{
+  // Don't set if already set and setHomeOnce is enabled
+  if (_model.state.gps.homeSet && _model.config.gps.setHomeOnce) {
+    return false;
+  }
+  
+  // Check if we have good GPS fix
+  if (!_model.state.gps.fix || _model.state.gps.fixType < 2) {
+    return false;
+  }
+  
+  // Check satellite count
+  if (_model.state.gps.numSats < _model.config.gps.minSats) {
+    return false;
+  }
+  
+  // Check horizontal accuracy (< 5 meters)
+  if (_model.state.gps.accuracy.horizontal > 5000) {
+    return false;
+  }
+  
+  return true;
+}
+
+// Parse NMEA GGA sentence for position and satellites
+void GpsSensor::handleNmeaGGA()
+{
+  // $GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47
+  const char* p = _nmeaMsg.payload;
+  
+  // Skip to first comma (past GPGGA)
+  while (*p && *p != ',') p++;
+  if (!*p) return;
+  p++; // skip comma
+  
+  // Skip time
+  while (*p && *p != ',') p++;
+  if (!*p) return;
+  p++;
+  
+  // Parse latitude
+  char latStr[12] = {0};
+  int i = 0;
+  while (*p && *p != ',' && i < 11) latStr[i++] = *p++;
+  if (!*p) return;
+  p++; // skip comma
+  
+  char latDir = *p;
+  p += 2; // skip N/S and comma
+  
+  // Parse longitude  
+  char lonStr[12] = {0};
+  i = 0;
+  while (*p && *p != ',' && i < 11) lonStr[i++] = *p++;
+  if (!*p) return;
+  p++;
+  
+  char lonDir = *p;
+  p += 2; // skip E/W and comma
+  
+  // Parse fix quality
+  int fixQuality = *p - '0';
+  p += 2; // skip fix and comma
+  
+  // Parse satellite count
+  char satStr[4] = {0};
+  i = 0;
+  while (*p && *p != ',' && i < 3) satStr[i++] = *p++;
+  int numSats = atoi(satStr);
+  if (*p) p++; // skip comma
+  
+  // Skip HDOP
+  while (*p && *p != ',') p++;
+  if (*p) p++; // skip comma
+  
+  // Parse altitude
+  char altStr[12] = {0};
+  i = 0;
+  while (*p && *p != ',' && i < 11) altStr[i++] = *p++;
+  float altitude = atof(altStr);
+  
+  // Convert lat/lon from NMEA format (DDMM.MMMM) to degrees * 1e7
+  float latDeg = atof(latStr);
+  int latDegInt = (int)(latDeg / 100);
+  float latMin = latDeg - (latDegInt * 100);
+  float lat = latDegInt + (latMin / 60.0);
+  if (latDir == 'S') lat = -lat;
+  
+  float lonDeg = atof(lonStr);
+  int lonDegInt = (int)(lonDeg / 100);
+  float lonMin = lonDeg - (lonDegInt * 100);
+  float lon = lonDegInt + (lonMin / 60.0);
+  if (lonDir == 'W') lon = -lon;
+  
+  // Update GPS state
+  _model.state.gps.location.raw.lat = (int32_t)(lat * 1e7);
+  _model.state.gps.location.raw.lon = (int32_t)(lon * 1e7);
+  _model.state.gps.location.raw.height = (int32_t)(altitude * 1000); // convert m to mm
+  _model.state.gps.numSats = numSats;
+  _model.state.gps.fix = (fixQuality > 0);
+  _model.state.gps.fixType = (fixQuality > 0) ? 3 : 0;
+  
+  uint32_t now = micros();
+  _model.state.gps.interval = now - _model.state.gps.lastMsgTs;
+  _model.state.gps.lastMsgTs = now;
+  
+  // Auto-set home
+  if (shouldSetHome()) {
+    if (_model.isModeActive(MODE_ARMED) && _model.config.gps.autoSetHome) {
+      setHomePosition();
+    }
+  }
+  
+  calculateHomeVector();
+}
+
+// Parse NMEA RMC sentence for speed, heading, and date/time
+void GpsSensor::handleNmeaRMC()
+{
+  // $GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A
+  const char* p = _nmeaMsg.payload;
+  
+  // Skip to first comma (past GPRMC)
+  while (*p && *p != ',') p++;
+  if (!*p) return;
+  p++; // skip comma
+  
+  // Parse time (HHMMSS.ss)
+  char timeStr[12] = {0};
+  int i = 0;
+  while (*p && *p != ',' && i < 11) timeStr[i++] = *p++;
+  if (*p) p++; // skip comma
+  
+  // Skip status
+  p += 2; // skip status and comma
+  
+  // Skip lat
+  while (*p && *p != ',') p++;
+  if (*p) p++; // skip comma
+  p += 2; // skip N/S and comma
+  
+  // Skip lon
+  while (*p && *p != ',') p++;
+  if (*p) p++; // skip comma
+  p += 2; // skip E/W and comma
+  
+  // Parse speed (knots)
+  char speedStr[12] = {0};
+  i = 0;
+  while (*p && *p != ',' && i < 11) speedStr[i++] = *p++;
+  float speedKnots = atof(speedStr);
+  if (*p) p++; // skip comma
+  
+  // Parse heading (degrees)
+  char headingStr[12] = {0};
+  i = 0;
+  while (*p && *p != ',' && i < 11) headingStr[i++] = *p++;
+  float heading = atof(headingStr);
+  if (*p) p++; // skip comma
+  
+  // Parse date (DDMMYY)
+  char dateStr[8] = {0};
+  i = 0;
+  while (*p && *p != ',' && i < 7) dateStr[i++] = *p++;
+  
+  // Convert speed from knots to mm/s (1 knot = 0.514444 m/s)
+  float speedMs = speedKnots * 0.514444f;
+  _model.state.gps.velocity.raw.groundSpeed = (int32_t)(speedMs * 1000); // m/s to mm/s
+  _model.state.gps.velocity.raw.heading = (int32_t)(heading * 1e5); // deg to deg * 1e5
+  
+  // Parse time
+  if (strlen(timeStr) >= 6) {
+    int hour = (timeStr[0] - '0') * 10 + (timeStr[1] - '0');
+    int min = (timeStr[2] - '0') * 10 + (timeStr[3] - '0');
+    int sec = (timeStr[4] - '0') * 10 + (timeStr[5] - '0');
+    
+    _model.state.gps.dateTime.hour = hour;
+    _model.state.gps.dateTime.minute = min;
+    _model.state.gps.dateTime.second = sec;
+  }
+  
+  // Parse date
+  if (strlen(dateStr) >= 6) {
+    int day = (dateStr[0] - '0') * 10 + (dateStr[1] - '0');
+    int month = (dateStr[2] - '0') * 10 + (dateStr[3] - '0');
+    int year = 2000 + (dateStr[4] - '0') * 10 + (dateStr[5] - '0');
+    
+    _model.state.gps.dateTime.day = day;
+    _model.state.gps.dateTime.month = month;
+    _model.state.gps.dateTime.year = year;
+  }
+}
+
+// M8/M9 NAV-PVT handler
 void GpsSensor::handleNavPvt() const
 {
   const auto &m = *_ubxMsg.getAs<Gps::UbxNavPvt92>();
 
-  _model.state.gps.fix = m.fixType == 3 && m.flags.gnssFixOk;
+  _model.state.gps.fix = m.fixType >= 2 && m.flags.gnssFixOk;
   _model.state.gps.fixType = m.fixType;
   _model.state.gps.numSats = m.numSV;
 
@@ -371,12 +668,96 @@ void GpsSensor::handleNavPvt() const
   uint32_t now = micros();
   _model.state.gps.interval = now - _model.state.gps.lastMsgTs;
   _model.state.gps.lastMsgTs = now;
+
+  // Auto-set home position
+  if (shouldSetHome()) {
+    if (_model.isModeActive(MODE_ARMED) && _model.config.gps.autoSetHome) {
+      setHomePosition();
+    }
+  }
+  
+  // Calculate distance and bearing to home
+  calculateHomeVector();
+}
+
+// M6/M7 NAV-POSLLH handler
+void GpsSensor::handleNavPosllh() const
+{
+  // NAV-POSLLH structure (28 bytes payload)
+  struct __attribute__((packed)) UbxNavPosllh {
+    uint32_t iTOW;
+    int32_t lon;      // deg * 1e7
+    int32_t lat;      // deg * 1e7
+    int32_t height;   // mm
+    int32_t hMSL;     // mm
+    uint32_t hAcc;    // mm
+    uint32_t vAcc;    // mm
+  };
+  
+  const auto &m = *reinterpret_cast<const UbxNavPosllh*>(_ubxMsg.payload);
+  
+  _model.state.gps.location.raw.lat = m.lat;
+  _model.state.gps.location.raw.lon = m.lon;
+  _model.state.gps.location.raw.height = m.hMSL;
+  
+  _model.state.gps.accuracy.horizontal = m.hAcc;
+  _model.state.gps.accuracy.vertical = m.vAcc;
+  
+  // Assume fix if we're getting position data (will be confirmed by NAV-SAT)
+  _model.state.gps.fix = true;
+  _model.state.gps.fixType = 3;
+  
+  uint32_t now = micros();
+  _model.state.gps.interval = now - _model.state.gps.lastMsgTs;
+  _model.state.gps.lastMsgTs = now;
+  
+  // Auto-set home position
+  if (shouldSetHome()) {
+    if (_model.isModeActive(MODE_ARMED) && _model.config.gps.autoSetHome) {
+      setHomePosition();
+    }
+  }
+  
+  // Calculate distance and bearing to home
+  calculateHomeVector();
+}
+
+// M6/M7 NAV-VELNED handler
+void GpsSensor::handleNavVelned() const
+{
+  // NAV-VELNED structure (36 bytes payload)
+  struct __attribute__((packed)) UbxNavVelned {
+    uint32_t iTOW;
+    int32_t velN;      // cm/s
+    int32_t velE;      // cm/s
+    int32_t velD;      // cm/s
+    uint32_t speed;    // cm/s
+    uint32_t gSpeed;   // cm/s
+    int32_t heading;   // deg * 1e5
+    uint32_t sAcc;     // cm/s
+    uint32_t cAcc;     // deg * 1e5
+  };
+  
+  const auto &m = *reinterpret_cast<const UbxNavVelned*>(_ubxMsg.payload);
+  
+  // Convert cm/s to mm/s (multiply by 10)
+  _model.state.gps.velocity.raw.north = m.velN * 10;
+  _model.state.gps.velocity.raw.east = m.velE * 10;
+  _model.state.gps.velocity.raw.down = m.velD * 10;
+  _model.state.gps.velocity.raw.groundSpeed = m.gSpeed * 10;
+  _model.state.gps.velocity.raw.heading = m.heading;
+  _model.state.gps.velocity.raw.speed3d = m.speed * 10;
+  
+  _model.state.gps.accuracy.speed = m.sAcc * 10;
+  _model.state.gps.accuracy.heading = m.cAcc;
 }
 
 void GpsSensor::handleNavSat() const
 {
   const auto &m = *_ubxMsg.getAs<Gps::UbxNavSat>();
   _model.state.gps.numCh = m.numSvs;
+  _model.state.gps.numSats = m.numSvs; // Update sat count from NAV-SAT
+  
   for (uint8_t i = 0; i < SAT_MAX; i++)
   {
     if(i < m.numSvs)
@@ -393,25 +774,47 @@ void GpsSensor::handleNavSat() const
   }
 }
 
-void GpsSensor::handleVersion() const
+void GpsSensor::handleVersion()
 {
   const char *payload = (const char *)_ubxMsg.payload;
 
   _model.logger.info().log(F("GPS VER")).logln(payload);
   _model.logger.info().log(F("GPS VER")).logln(payload + 30);
 
-  if (std::strcmp(payload + 30, "00080000") == 0)
+  // Detect GPS version and set message format
+  if (std::strcmp(payload + 30, "00040007") == 0 || 
+      std::strcmp(payload + 30, "00070000") == 0)
+  {
+    // Neo-6M (00040007) or Neo-7M (00070000) - use legacy messages
+    _model.state.gps.support.version = GPS_UNKNOWN;
+    _useLegacyMessages = true;
+    _model.logger.info().logln(F("GPS M6/M7 MODE"));
+  }
+  else if (std::strcmp(payload + 30, "00080000") == 0)
   {
     _model.state.gps.support.version = GPS_M8;
+    _useLegacyMessages = false;
+    _model.logger.info().logln(F("GPS M8 MODE"));
   }
   else if (std::strcmp(payload + 30, "00090000") == 0)
   {
     _model.state.gps.support.version = GPS_M9;
+    _useLegacyMessages = false;
+    _model.logger.info().logln(F("GPS M9 MODE"));
   }
   else if (std::strcmp(payload + 30, "00190000") == 0)
   {
     _model.state.gps.support.version = GPS_F9;
+    _useLegacyMessages = false;
+    _model.logger.info().logln(F("GPS F9 MODE"));
   }
+  else
+  {
+    // Unknown GPS, try M8+ protocol first
+    _useLegacyMessages = false;
+    _model.logger.info().logln(F("GPS UNKNOWN, TRY M8+"));
+  }
+  
   if (_ubxMsg.length >= 70)
   {
     checkSupport(payload + 40);

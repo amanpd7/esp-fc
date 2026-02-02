@@ -20,6 +20,14 @@ public:
   int update();
 
 private:
+  void calculateHomeVector() const;
+  void setHomePosition() const;
+  bool shouldSetHome() const;
+  
+  static float haversineDistance(int32_t lat1, int32_t lon1, 
+                                  int32_t lat2, int32_t lon2);
+  static int16_t calculateBearing(int32_t lat1, int32_t lon1,
+                                  int32_t lat2, int32_t lon2);
   enum State {
     DETECT_BAUD,
     SET_BAUD,
@@ -57,9 +65,13 @@ private:
   void setState(State state);
 
   void handleError() const;
-  void handleNavPvt() const;
+  void handleNavPvt() const;     // M8/M9 handler
+  void handleNavPosllh() const;  // M6/M7 position handler
+  void handleNavVelned() const;  // M6/M7 velocity handler
   void handleNavSat() const;
-  void handleVersion() const;
+  void handleNmeaGGA();          // NMEA GGA parser (position/altitude)
+  void handleNmeaRMC();          // NMEA RMC parser (speed/heading/time)
+  void handleVersion();          // Non-const: modifies _useLegacyMessages
   void checkSupport(const char* payload) const;
 
   static constexpr uint32_t TIMEOUT = 300000;
@@ -74,6 +86,7 @@ private:
   uint32_t _timeout = 0;
   int _currentBaud = 0;
   int _targetBaud = 0;
+  bool _useLegacyMessages;  // true for M6/M7, false for M8/M9
 
   Gps::UbxParser _ubxParser;
   Gps::UbxMessage _ubxMsg;

@@ -670,6 +670,16 @@ struct GpsConfig
 {
   uint8_t minSats = 8;
   uint8_t setHomeOnce = 1;
+  uint8_t autoSetHome = 1;       // Auto-set home on first arm
+  uint16_t homeMinDistance = 5;  // Min distance from home to reset (meters)
+  
+  // GPS Rescue configuration
+  uint8_t rescueMinSats = 8;     // Minimum satellites for rescue
+  uint16_t rescueAltitude = 50;  // Rescue altitude (meters)
+  uint16_t rescueMinDistance = 10; // Minimum distance for rescue (meters)
+  uint16_t rescueGroundSpeed = 5;  // Target ground speed (m/s)
+  uint8_t rescueSanityChecks = 1;  // Enable sanity checks
+  uint16_t rescueMaxAngle = 45;    // Max tilt angle (degrees)
 };
 
 struct LedConfig

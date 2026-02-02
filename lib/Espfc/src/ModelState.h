@@ -460,6 +460,11 @@ struct GpsState
   GpsAccuracy accuracy;
   GpsDateTime dateTime;
   GpsSatelite svinfo[SAT_MAX];
+  GpsPosition home;              // Home position
+  uint16_t distanceToHome = 0;   // Distance to home (meters)
+  int16_t directionToHome = 0;   // Direction to home (degrees)
+  // Helper method
+  bool isHomeValid() const { return homeSet && fix && fixType >= 2; }
 };
 
 // runtime data
