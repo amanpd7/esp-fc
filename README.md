@@ -20,6 +20,7 @@ The mini, DIY, Low cost, ESP32 based, high performance flight controller for hob
 * In flight PID Tuning
 * Buzzer, Led and voltage monitor
 * Failsafe mode
+* GPS rescue
 
 # Documentation
 
@@ -93,6 +94,7 @@ After flashing you need to configure few things first:
  * Magnetometers: HMC5883, QMC5883, AK8963, QMC5883P
  * Receivers: PPM, SBUS, IBUS, CRSF/ELRS
  * Esc Protocols: PWM, BRUSHED, ONESHOT125, ONESHOT42, MULTISHOT, DSHOT150, DSHOT300, DSHOT600
+ * GPS: M8, M9, F9 & M10(dual band, all constellations configurable by cli)
  * Other protocols: MSP, CLI, BLACKBOX, ESPNOW
 
 ## Issues

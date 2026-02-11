@@ -20,11 +20,20 @@ public:
   int update();
 
 private:
+  void calculateHomeVector() const;
+  void setHomePosition() const;
+  bool shouldSetHome() const;
+  
+  static float haversineDistance(int32_t lat1, int32_t lon1, 
+                                  int32_t lat2, int32_t lon2);
+  static int16_t calculateBearing(int32_t lat1, int32_t lon1,
+                                  int32_t lat2, int32_t lon2);
+  
   enum State {
     DETECT_BAUD,
     SET_BAUD,
-    DISABLE_NMEA,
     GET_VERSION,
+    CONFIGURE_GNSS,
     ENABLE_UBX,
     ENABLE_NAV5,
     ENABLE_SBAS,
@@ -37,7 +46,6 @@ private:
   void handle();
 
   bool processUbx(uint8_t c);
-  void processNmea(uint8_t c);
   void setBaud(int baud);
 
   void onMessage();
@@ -53,7 +61,6 @@ private:
   }
 
   void setState(State state, State ackState, State timeoutState);
-
   void setState(State state);
 
   void handleError() const;
@@ -61,6 +68,7 @@ private:
   void handleNavSat() const;
   void handleVersion() const;
   void checkSupport(const char* payload) const;
+  void configureGnss();
 
   static constexpr uint32_t TIMEOUT = 300000;
   static constexpr uint32_t DETECT_TIMEOUT = 2200000;
@@ -77,9 +85,6 @@ private:
 
   Gps::UbxParser _ubxParser;
   Gps::UbxMessage _ubxMsg;
-
-  Gps::NmeaParser _nmeaParser;
-  Gps::NmeaMessage _nmeaMsg;
 
   Device::SerialDevice* _port;
   Utils::Timer _timer;

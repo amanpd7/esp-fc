@@ -670,6 +670,26 @@ struct GpsConfig
 {
   uint8_t minSats = 8;
   uint8_t setHomeOnce = 1;
+  uint8_t autoSetHome = 1;       // Auto-set home on first arm
+  uint16_t homeMinDistance = 5;  // Min distance from home to reset (meters)
+  
+  // GPS Rescue configuration
+  uint8_t rescueMinSats = 8;     // Minimum satellites for rescue
+  uint16_t rescueAltitude = 50;  // Rescue altitude (meters)
+  uint16_t rescueMinDistance = 10; // Minimum distance for rescue (meters)
+  uint16_t rescueGroundSpeed = 5;  // Target ground speed (m/s)
+  uint8_t rescueSanityChecks = 1;  // Enable sanity checks
+  uint16_t rescueMaxAngle = 45;    // Max tilt angle (degrees)
+  
+  // GNSS Constellation Configuration (M10 multi-band support)
+  uint8_t gnssMode = 0;          // 0=Auto, 1=GPS only, 2=GPS+GLO, 3=GPS+GAL, 4=GPS+BDS, 5=All
+  uint8_t enableDualBand = 1;    // Enable L1+L5 dual-band on M10 (0=L1 only, 1=Auto/M10 dual-band)
+  uint8_t enableGPS = 1;         // Enable GPS constellation
+  uint8_t enableGLONASS = 1;     // Enable GLONASS constellation
+  uint8_t enableGalileo = 1;     // Enable Galileo constellation
+  uint8_t enableBeiDou = 1;      // Enable BeiDou constellation
+  uint8_t enableQZSS = 1;        // Enable QZSS (Asia-Pacific)
+  uint8_t enableSBAS = 1;        // Enable SBAS (WAAS/EGNOS)
 };
 
 struct LedConfig
