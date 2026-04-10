@@ -76,8 +76,8 @@ Tu unmap pin function use -1 as pin number
 
 | CLI name            | ESP32 | ESP32-S3 | Comment       |
 |---------------------|------:|---------:|---------------|
-| `pin_buzzer`        |  26   | 5        | Status buzzer |
-| `pin_led`           |  2    | -        | Status led    |
+| `pin_buzzer`        |  0    | 5        | Status buzzer |
+| `pin_led`           |  26   | -        | Status led    |
 
 ## Example ESP32 SPI MPU-6500/MPU-9250 gyro
 

@@ -43,6 +43,7 @@ enum MsgId: uint16_t
   UBX_CFG_RATE     = 0x08 << 8 | UBX_CFG,  // Navigation/measurement rate settings
   UBX_CFG_SBAS     = 0x16 << 8 | UBX_CFG,  // SBAS configuration
   UBX_CFG_NAV5     = 0x24 << 8 | UBX_CFG,  // Navigation engine settings
+  UBX_CFG_GNSS     = 0x3E << 8 | UBX_CFG,  // GNSS system configuration
 
   UBX_NAV_HPOSECEF = 0x13 << 8 | UBX_NAV,  // High precision position solution in ECEF (28 Bytes)
   UBX_NAV_HPOSLLH  = 0x14 << 8 | UBX_NAV,  // High precision geodetic position solution (36 Bytes)
@@ -238,6 +239,29 @@ public:
   uint8_t maxSbas;  // Maximum number of SBAS prioritized tracking channels (valid range: 0 - 3) to use
   uint8_t scanmode2; // Continuation of scanmode bitmask
   uint32_t scanmode1; // Which SBAS PRN numbers to search for (bitmask).If all bits are set to zero, auto-scan (i.e. allvalid PRNs) are searched. Every bit corresponds to a PRN number
+} __attribute__((packed));
+
+struct UbxCfgGnssBlock
+{
+  uint8_t gnssId;
+  uint8_t resTrkCh;
+  uint8_t maxTrkCh;
+  uint8_t reserved1;
+  uint8_t flagsEnable;  // bit 0: enable GNSS system
+  uint8_t flagsReserved;
+  uint8_t sigCfgMask;   // signal config: 0x01=L1, 0x03=L1+L5 (M10 dual-band)
+  uint8_t flagsHigh;
+} __attribute__((packed));
+
+class UbxCfgGnss7
+{
+public:
+  static constexpr MsgId ID = UBX_CFG_GNSS;
+  uint8_t msgVer;
+  uint8_t numTrkChHw;
+  uint8_t numTrkChUse;
+  uint8_t numConfigBlocks;
+  UbxCfgGnssBlock blocks[7];
 } __attribute__((packed));
 
 class UbxCfgNav5

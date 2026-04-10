@@ -20,7 +20,6 @@ The mini, DIY, Low cost, ESP32 based, high performance flight controller for hob
 * In flight PID Tuning
 * Buzzer, Led and voltage monitor
 * Failsafe mode
-* GPS rescue
 
 # Documentation
 

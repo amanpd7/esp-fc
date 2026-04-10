@@ -886,7 +886,7 @@ void Cli::execute(CliCmd& cmd, Stream& s)
       PSTR("available commands:"),
       PSTR(" help"), PSTR(" dump"), PSTR(" get param"), PSTR(" set param value ..."), PSTR(" cal [gyro]"),
       PSTR(" defaults"), PSTR(" save"), PSTR(" reboot"), PSTR(" scaler"), PSTR(" mixer"),
-      PSTR(" stats"), PSTR(" status"), PSTR(" devinfo"), PSTR(" version"), PSTR(" logs"), PSTR(" gps"), PSTR(" gps_home"),
+      PSTR(" stats"), PSTR(" status"), PSTR(" devinfo"), PSTR(" version"), PSTR(" logs"), PSTR(" gps [set_home|clear_home]"),
       //PSTR(" load"), PSTR(" eeprom"),
       //PSTR(" fsinfo"), PSTR(" fsformat"), PSTR(" log"),
       nullptr
@@ -1072,55 +1072,19 @@ void Cli::execute(CliCmd& cmd, Stream& s)
   }
   else if(strcmp_P(cmd.args[0], PSTR("gps")) == 0)
   {
-    printGpsStatus(s, true);
-  }
-  else if(strcmp_P(cmd.args[0], PSTR("gps_home")) == 0)
-  {
-    if (cmd.args[1])
+    if(cmd.args[1] && strcmp_P(cmd.args[1], PSTR("set_home")) == 0)
     {
-      if (strcmp_P(cmd.args[1], PSTR("set")) == 0)
-      {
-        // Force set home position
-        if (_model.state.gps.fix && _model.state.gps.fixType >= 2)
-        {
-          _model.state.gps.home.raw = _model.state.gps.location.raw;
-          _model.state.gps.homeSet = true;
-          s.println(F("Home position set"));
-        }
-        else
-        {
-          s.println(F("No GPS fix"));
-        }
-      }
-      else if (strcmp_P(cmd.args[1], PSTR("clear")) == 0)
-      {
-        _model.state.gps.homeSet = false;
-        s.println(F("Home position cleared"));
-      }
+      _model.setGpsHome(true);
+      s.println(_model.state.gps.homeSet ? F("Home position set") : F("No GPS fix"));
+    }
+    else if(cmd.args[1] && strcmp_P(cmd.args[1], PSTR("clear_home")) == 0)
+    {
+      _model.state.gps.homeSet = false;
+      s.println(F("Home position cleared"));
     }
     else
     {
-      // Display home position
-      if (_model.state.gps.homeSet)
-      {
-        s.print(F("Home: "));
-        s.print(_model.state.gps.home.raw.lat * 1e-7f, 7);
-        s.print(F(", "));
-        s.print(_model.state.gps.home.raw.lon * 1e-7f, 7);
-        s.print(F(" ("));
-        s.print(_model.state.gps.home.raw.height * 0.001f, 1);
-        s.println(F("m)"));
-        
-        s.print(F("Distance: "));
-        s.print(_model.state.gps.distanceToHome);
-        s.print(F("m, Bearing: "));
-        s.print(_model.state.gps.directionToHome);
-        s.println(F("°"));
-      }
-      else
-      {
-        s.println(F("Home not set"));
-      }
+      printGpsStatus(s, true);
     }
   }
   else if(strcmp_P(cmd.args[0], PSTR("preset")) == 0)
@@ -1625,21 +1589,21 @@ void Cli::printGpsStatus(Stream& s, bool full) const
   if (_model.state.gps.homeSet)
   {
     s.print(F("  Lat:  "));
-    s.print(_model.state.gps.home.raw.lat);
+    s.print(_model.state.gps.location.home.lat);
     s.print(F(" ("));
-    s.print(_model.state.gps.home.raw.lat * 1e-7f, 7);
+    s.print(_model.state.gps.location.home.lat * 1e-7f, 7);
     s.println(F(")"));
-    
+
     s.print(F("  Lon:  "));
-    s.print(_model.state.gps.home.raw.lon);
+    s.print(_model.state.gps.location.home.lon);
     s.print(F(" ("));
-    s.print(_model.state.gps.home.raw.lon * 1e-7f, 7);
+    s.print(_model.state.gps.location.home.lon * 1e-7f, 7);
     s.println(F(")"));
-    
+
     s.print(F("  Dist: "));
     s.print(_model.state.gps.distanceToHome);
     s.println(F(" m"));
-    
+
     s.print(F("  Bear: "));
     s.print(_model.state.gps.directionToHome);
     s.println(F(" deg"));

@@ -8,7 +8,12 @@ namespace Espfc::Sensor
 {
 
 static constexpr std::array<int, 6> BAUDS{
-  115200, 230400, 460800, 57600, 38400, 9600,
+  9600, 115200, 230400, 57600, 38400, 19200,
+};
+
+static constexpr std::array<uint16_t, 6> NMEA_MSG_OFF{
+  Gps::NMEA_MSG_GGA, Gps::NMEA_MSG_GLL, Gps::NMEA_MSG_GSA,
+  Gps::NMEA_MSG_GSV, Gps::NMEA_MSG_RMC, Gps::NMEA_MSG_VTG,
 };
 
 static constexpr std::array<std::tuple<uint16_t, uint8_t>, 2> UBX_MSG_ON{
@@ -48,6 +53,7 @@ int GpsSensor::update()
     for (size_t i = 0; i < read; i++)
     {
       updated |= processUbx(buff[i]);
+      processNmea(buff[i]);
     }
   }
 
@@ -69,6 +75,25 @@ bool GpsSensor::processUbx(uint8_t c)
   return true;
 }
 
+void GpsSensor::processNmea(uint8_t c)
+{
+  _nmeaParser.parse(c, _nmeaMsg);
+  if (!_nmeaMsg.isReady()) return;
+
+  //$GNTXT,01,01,01,More than 100 frame errors, UART RX was disabled*70
+  static const char * msg = "GNTXT,01,01,01,More than 100 frame errors";
+
+  if(!_model.state.gps.frameError && std::strncmp(_nmeaMsg.payload, msg, std::strlen(msg)) == 0)
+  {
+    _model.state.gps.frameError = true;
+    if(!_model.isModeActive(MODE_ARMED)) _model.logger.err().logln("GPS RX Frame Err");
+  }
+
+  onMessage();
+
+  _nmeaMsg = Gps::NmeaMessage();
+}
+
 void GpsSensor::onMessage()
 {
   if(_state == DETECT_BAUD)
@@ -85,6 +110,7 @@ void GpsSensor::handle()
     case DETECT_BAUD:
       if(micros() > _timeout)
       {
+        // on timeout check next baud
         _counter++;
         if(_counter < BAUDS.size())
         {
@@ -104,25 +130,41 @@ void GpsSensor::handle()
         .portId = 1,
         .resered1 = 0,
         .txReady = 0,
-        .mode = 0x08c0,
-        .baudRate = (uint32_t)_targetBaud,
-        .inProtoMask = 0x01,
-        .outProtoMask = 0x01,
+        .mode = 0x08c0,     // 8N1
+        .baudRate = (uint32_t)_targetBaud, // baud
+        .inProtoMask = 0x07,
+        .outProtoMask = 0x07,
         .flags = 0,
         .resered2 = 0,
-      }, GET_VERSION, GET_VERSION);
-      delay(30);
+      }, DISABLE_NMEA, DISABLE_NMEA);
+      delay(30); // wait until transmission complete at 9600bps
       setBaud(_targetBaud);
       delay(5);
       break;
 
-    case GET_VERSION:
-      send(Gps::UbxMonVer{}, CONFIGURE_GNSS);
-      _timeout = micros() + 3 * TIMEOUT;
-      break;
+    case DISABLE_NMEA:
+    {
+      const Gps::UbxCfgMsg3 m{
+        .msgId = NMEA_MSG_OFF[_counter],
+        .rate = 0,
+      };
+      _counter++;
+      if (_counter < NMEA_MSG_OFF.size())
+      {
+        send(m, _state);
+      }
+      else
+      {
+        _counter = 0;
+        send(m, GET_VERSION);
+        _model.logger.info().log(F("GPS NMEA")).logln(0);
+      }
+    }
+    break;
 
-    case CONFIGURE_GNSS:
-      configureGnss();
+    case GET_VERSION:
+      send(Gps::UbxMonVer{}, ENABLE_UBX); // version handled in WAIT/RECEIVE
+      _timeout = micros() + 3 * TIMEOUT;
       break;
 
     case ENABLE_UBX:
@@ -148,8 +190,8 @@ void GpsSensor::handle()
 
     case ENABLE_NAV5:
       send(Gps::UbxCfgNav5{
-        .mask = { .value = 0xffff },
-        .dynModel = 8,
+        .mask = { .value = 0xffff }, // all
+        .dynModel = 8, // airborne
         .fixMode = 3,
         .fixedAlt = 0,
         .fixedAltVar = 10000,
@@ -180,35 +222,30 @@ void GpsSensor::handle()
           .maxSbas = 3,
           .scanmode2 = 0,
           .scanmode1 = 0,
-        }, SET_RATE, SET_RATE);
+        }, CONFIGURE_GNSS, CONFIGURE_GNSS);
       }
       else
       {
-        setState(SET_RATE);
+        setState(CONFIGURE_GNSS);
       }
       _model.logger.info().log(F("GPS SBAS")).logln(_model.state.gps.support.sbas);
       break;
 
+    case CONFIGURE_GNSS:
+      configureGnss();
+      break;
+
     case SET_RATE:
     {
-      uint16_t mRate;
-      if (_model.state.gps.support.version == GPS_M10)
-      {
-        mRate = _currentBaud >= 230400 ? 40 : 100;
-      }
-      else
-      {
-        mRate = _currentBaud >= 115200 ? 100 : 200;
-      }
-      
+      const uint16_t mRate = _currentBaud > 100000 ? 100 : 200;
       const uint16_t nRate = 1;
       const Gps::UbxCfgRate6 m{
         .measRate = mRate,
         .navRate = nRate,
-        .timeRef = 0,
+        .timeRef = 0, // utc
       };
       send(m, RECEIVE);
-      _model.logger.info().log(F("GPS RATE")).log(mRate).log('/').logln(nRate);
+      _model.logger.info().log(F("GPS RATE")).log(mRate).logln(nRate);
     }
     break;
 
@@ -252,6 +289,7 @@ void GpsSensor::handle()
       }
       else if (_state == WAIT && micros() > _timeout)
       {
+        // timeout
         _state = _timeoutState;
         _model.state.gps.present = false;
       }
@@ -291,16 +329,14 @@ void GpsSensor::configureGnss()
 {
   const auto version = _model.state.gps.support.version;
   const bool useDualBand = (_model.config.gps.enableDualBand && version == GPS_M10);
-  
-  // Determine which constellations to enable based on gnssMode
-  bool enableGPS = _model.config.gps.enableGPS;
-  bool enableGLO = _model.config.gps.enableGLONASS;
-  bool enableGAL = _model.config.gps.enableGalileo;
-  bool enableBDS = _model.config.gps.enableBeiDou;
+
+  bool enableGPS  = _model.config.gps.enableGPS;
+  bool enableGLO  = _model.config.gps.enableGLONASS;
+  bool enableGAL  = _model.config.gps.enableGalileo;
+  bool enableBDS  = _model.config.gps.enableBeiDou;
   bool enableQZSS = _model.config.gps.enableQZSS;
   bool enableSBAS = _model.config.gps.enableSBAS;
-  
-  // Apply gnssMode preset if not Auto
+
   switch (_model.config.gps.gnssMode)
   {
     case 1: // GPS only
@@ -322,77 +358,44 @@ void GpsSensor::configureGnss()
     case 5: // All constellations
       enableGPS = enableGLO = enableGAL = enableBDS = enableQZSS = true;
       break;
-    // case 0: Auto - use individual enable flags (default)
+    // case 0: Auto - use individual enable flags
   }
-  
-  if (version == GPS_M10 || version == GPS_M8 || version == GPS_M9 || version == GPS_F9)
-  {
-    // Build GNSS configuration based on user settings
-    uint8_t gnssConfig[] = {
-      0xB5, 0x62,       // Header
-      0x06, 0x3E,       // CFG-GNSS
-      0x3C, 0x00,       // Length: 60 bytes
-      0x00,             // msgVer
-      0x00,             // numTrkChHw
-      0xFF,             // numTrkChUse
-      0x07,             // numConfigBlocks
+
+  const Gps::UbxCfgGnss7 gnss{
+    .msgVer = 0,
+    .numTrkChHw = 0,
+    .numTrkChUse = 0xFF,
+    .numConfigBlocks = 7,
+    .blocks = {
       // GPS: L1C/A or L1+L5
-      0x00, 0x08, 0x10, 0x00,
-      (uint8_t)(enableGPS ? 0x01 : 0x00), 0x00,
-      (uint8_t)(useDualBand ? 0x03 : 0x01), 0x01,
+      { 0x00, 0x08, 0x10, 0x00, (uint8_t)(enableGPS  ? 0x01 : 0x00), 0x00, (uint8_t)(useDualBand ? 0x03 : 0x01), 0x01 },
       // SBAS: L1C/A
-      0x01, 0x01, 0x03, 0x00,
-      (uint8_t)(enableSBAS ? 0x01 : 0x00), 0x00, 0x01, 0x01,
+      { 0x01, 0x01, 0x03, 0x00, (uint8_t)(enableSBAS ? 0x01 : 0x00), 0x00, 0x01, 0x01 },
       // Galileo: E1 or E1+E5a
-      0x02, 0x04, 0x08, 0x00,
-      (uint8_t)(enableGAL ? 0x01 : 0x00), 0x00, 0x01, 0x01,
+      { 0x02, 0x04, 0x08, 0x00, (uint8_t)(enableGAL  ? 0x01 : 0x00), 0x00, 0x01, 0x01 },
       // BeiDou: B1I or B1I+B2a
-      0x03, 0x08, 0x10, 0x00,
-      (uint8_t)(enableBDS ? 0x01 : 0x00), 0x00,
-      (uint8_t)(useDualBand ? 0x03 : 0x01), 0x01,
+      { 0x03, 0x08, 0x10, 0x00, (uint8_t)(enableBDS  ? 0x01 : 0x00), 0x00, (uint8_t)(useDualBand ? 0x03 : 0x01), 0x01 },
       // IMES: disabled
-      0x04, 0x00, 0x00, 0x00, 0x05, 0x00, 0x01, 0x01,
+      { 0x04, 0x00, 0x00, 0x00, 0x05, 0x00, 0x01, 0x01 },
       // QZSS: L1C/A or L1+L5
-      0x05, 0x00, 0x03, 0x00,
-      (uint8_t)(enableQZSS ? 0x01 : 0x00), 0x00, 0x01, 0x01,
+      { 0x05, 0x00, 0x03, 0x00, (uint8_t)(enableQZSS ? 0x01 : 0x00), 0x00, 0x01, 0x01 },
       // GLONASS: L1
-      0x06, 0x08, 0x0E, 0x00,
-      (uint8_t)(enableGLO ? 0x01 : 0x00), 0x00, 0x01, 0x01,
-      0x00, 0x00        // Checksum (will be calculated)
-    };
-    
-    // Calculate checksum
-    uint8_t ckA = 0, ckB = 0;
-    for (size_t i = 2; i < sizeof(gnssConfig) - 2; i++)
-    {
-      ckA += gnssConfig[i];
-      ckB += ckA;
-    }
-    gnssConfig[sizeof(gnssConfig) - 2] = ckA;
-    gnssConfig[sizeof(gnssConfig) - 1] = ckB;
-    
-    _port->write(gnssConfig, sizeof(gnssConfig));
-    
-    // Log configuration
-    _model.logger.info().log(F("GPS GNSS "));
-    if (useDualBand) {
-      _model.logger.info().log(F("L1+L5 "));
-    }
-    _model.logger.info().log(F("["));
-    if (enableGPS) _model.logger.info().log(F("GPS "));
-    if (enableGLO) _model.logger.info().log(F("GLO "));
-    if (enableGAL) _model.logger.info().log(F("GAL "));
-    if (enableBDS) _model.logger.info().log(F("BDS "));
-    if (enableQZSS) _model.logger.info().log(F("QZSS "));
-    if (enableSBAS) _model.logger.info().log(F("SBAS"));
-    _model.logger.info().logln(F("]"));
-    
-    setState(WAIT, ENABLE_UBX, ENABLE_UBX);
-  }
-  else
-  {
-    setState(ENABLE_UBX);
-  }
+      { 0x06, 0x08, 0x0E, 0x00, (uint8_t)(enableGLO  ? 0x01 : 0x00), 0x00, 0x01, 0x01 },
+    },
+  };
+
+  _model.logger.info().log(F("GPS GNSS "));
+  if (useDualBand) _model.logger.info().log(F("L1+L5 "));
+  _model.logger.info().log(F("["));
+  if (enableGPS)  _model.logger.info().log(F("GPS "));
+  if (enableGLO)  _model.logger.info().log(F("GLO "));
+  if (enableGAL)  _model.logger.info().log(F("GAL "));
+  if (enableBDS)  _model.logger.info().log(F("BDS "));
+  if (enableQZSS) _model.logger.info().log(F("QZSS "));
+  if (enableSBAS) _model.logger.info().log(F("SBAS"));
+  _model.logger.info().logln(F("]"));
+
+  send(gnss, SET_RATE);
 }
 
 void GpsSensor::calculateHomeVector() const
@@ -402,99 +405,22 @@ void GpsSensor::calculateHomeVector() const
     _model.state.gps.directionToHome = 0;
     return;
   }
-  
-  _model.state.gps.distanceToHome = haversineDistance(
-    _model.state.gps.home.raw.lat,
-    _model.state.gps.home.raw.lon,
-    _model.state.gps.location.raw.lat,
-    _model.state.gps.location.raw.lon
-  );
-  
-  _model.state.gps.directionToHome = calculateBearing(
-    _model.state.gps.location.raw.lat,
-    _model.state.gps.location.raw.lon,
-    _model.state.gps.home.raw.lat,
-    _model.state.gps.home.raw.lon
-  );
-}
 
-float GpsSensor::haversineDistance(int32_t lat1, int32_t lon1, 
-                                    int32_t lat2, int32_t lon2)
-{
-  const double R = 6371000.0;
-  
-  double phi1 = lat1 * 1e-7 * M_PI / 180.0;
-  double phi2 = lat2 * 1e-7 * M_PI / 180.0;
-  double deltaPhi = (lat2 - lat1) * 1e-7 * M_PI / 180.0;
-  double deltaLambda = (lon2 - lon1) * 1e-7 * M_PI / 180.0;
-  
-  double a = sin(deltaPhi / 2.0) * sin(deltaPhi / 2.0) +
-             cos(phi1) * cos(phi2) *
-             sin(deltaLambda / 2.0) * sin(deltaLambda / 2.0);
-  
-  double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
-  
-  return R * c;
-}
+  const int32_t lat1 = _model.state.gps.location.home.lat;
+  const int32_t lon1 = _model.state.gps.location.home.lon;
+  const int32_t lat2 = _model.state.gps.location.raw.lat;
+  const int32_t lon2 = _model.state.gps.location.raw.lon;
 
-int16_t GpsSensor::calculateBearing(int32_t lat1, int32_t lon1,
-                                     int32_t lat2, int32_t lon2)
-{
-  double phi1 = lat1 * 1e-7 * M_PI / 180.0;
-  double phi2 = lat2 * 1e-7 * M_PI / 180.0;
-  double deltaLambda = (lon2 - lon1) * 1e-7 * M_PI / 180.0;
-  
-  double y = sin(deltaLambda) * cos(phi2);
-  double x = cos(phi1) * sin(phi2) -
-             sin(phi1) * cos(phi2) * cos(deltaLambda);
-  
-  double theta = atan2(y, x);
-  double bearing = fmod((theta * 180.0 / M_PI + 360.0), 360.0);
-  
-  return (int16_t)bearing;
-}
+  // Equirectangular approximation (valid for short distances < few km)
+  const float LAT_TO_M = 1.113e-2f; // deg*1e-7 to meters (111300 m/deg / 1e7)
+  const float dlat = (lat2 - lat1) * LAT_TO_M;
+  const float dlon = (lon2 - lon1) * LAT_TO_M * cosf(lat1 * 1e-7f * (float)M_PI / 180.0f);
 
-void GpsSensor::setHomePosition() const
-{
-  if (!_model.state.gps.fix || _model.state.gps.fixType < 2) {
-    return;
-  }
-  
-  if (_model.state.gps.numSats < _model.config.gps.minSats) {
-    return;
-  }
-  
-  _model.state.gps.home.raw.lat = _model.state.gps.location.raw.lat;
-  _model.state.gps.home.raw.lon = _model.state.gps.location.raw.lon;
-  _model.state.gps.home.raw.height = _model.state.gps.location.raw.height;
-  _model.state.gps.homeSet = true;
-  
-  _model.logger.info()
-    .log(F("GPS HOME SET: "))
-    .log(_model.state.gps.home.raw.lat * 1e-7f)
-    .log(F(", "))
-    .logln(_model.state.gps.home.raw.lon * 1e-7f);
-}
+  _model.state.gps.distanceToHome = (uint16_t)sqrtf(dlat * dlat + dlon * dlon);
 
-bool GpsSensor::shouldSetHome() const
-{
-  if (_model.state.gps.homeSet && _model.config.gps.setHomeOnce) {
-    return false;
-  }
-  
-  if (!_model.state.gps.fix || _model.state.gps.fixType < 2) {
-    return false;
-  }
-  
-  if (_model.state.gps.numSats < _model.config.gps.minSats) {
-    return false;
-  }
-  
-  if (_model.state.gps.accuracy.horizontal > 5000) {
-    return false;
-  }
-  
-  return true;
+  float bearing = atan2f(dlon, dlat) * (180.0f / (float)M_PI);
+  if (bearing < 0.0f) bearing += 360.0f;
+  _model.state.gps.directionToHome = (int16_t)bearing;
 }
 
 void GpsSensor::handleNavPvt() const
@@ -506,10 +432,10 @@ void GpsSensor::handleNavPvt() const
   _model.state.gps.numSats = m.numSV;
 
   _model.state.gps.accuracy.pDop = m.pDOP;
-  _model.state.gps.accuracy.horizontal = m.hAcc;
-  _model.state.gps.accuracy.vertical = m.vAcc;
-  _model.state.gps.accuracy.speed = m.sAcc;
-  _model.state.gps.accuracy.heading = m.headAcc;
+  _model.state.gps.accuracy.horizontal = m.hAcc; // mm
+  _model.state.gps.accuracy.vertical = m.vAcc;   // mm
+  _model.state.gps.accuracy.speed = m.sAcc;      // mm/s
+  _model.state.gps.accuracy.heading = m.headAcc; // deg * 1e5
 
   _model.state.gps.location.raw.lat = m.lat;
   _model.state.gps.location.raw.lon = m.lon;
@@ -545,12 +471,6 @@ void GpsSensor::handleNavPvt() const
   _model.state.gps.interval = now - _model.state.gps.lastMsgTs;
   _model.state.gps.lastMsgTs = now;
 
-  if (shouldSetHome()) {
-    if (_model.isModeActive(MODE_ARMED) && _model.config.gps.autoSetHome) {
-      setHomePosition();
-    }
-  }
-  
   calculateHomeVector();
 }
 
@@ -598,7 +518,7 @@ void GpsSensor::handleVersion() const
     _model.state.gps.support.version = GPS_M10;
     _model.state.gps.support.dualBand = true;
   }
-  
+
   if (_ubxMsg.length >= 70)
   {
     checkSupport(payload + 40);

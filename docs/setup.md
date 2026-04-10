@@ -61,7 +61,7 @@ ESP-FC supports u-blox M8, M9, F9, and M10 GPS modules via UART. M10 modules pro
 In the `Configuration` tab, under `Other Features`, enable **GPS** or use CLI:
 
 ```
-set feature_mask = 128
+set feature_gps 1
 save
 ```
 
@@ -83,13 +83,10 @@ Go to CLI tab and configure basic GPS settings:
 
 ```
 # Minimum satellites required for valid fix
-set gps_min_sats = 8
-
-# Auto-set home position on first arm
-set gps_auto_set_home = 1
+set gps_min_sats 8
 
 # Set home only once (0 = update home on each arm)
-set gps_set_home_once = 1
+set gps_set_home_once 1
 
 save
 ```
@@ -102,22 +99,22 @@ M10 modules support multiple GNSS constellations and dual-band (L1+L5) for bette
 
 ```
 # Mode 0: Auto (use individual constellation flags) - DEFAULT
-set gps_gnss_mode = 0
+set gps_gnss_mode 0
 
 # Mode 1: GPS only (maximum compatibility, lowest power)
-set gps_gnss_mode = 1
+set gps_gnss_mode 1
 
 # Mode 2: GPS + GLONASS (good for high latitudes)
-set gps_gnss_mode = 2
+set gps_gnss_mode 2
 
 # Mode 3: GPS + Galileo (best accuracy in Europe)
-set gps_gnss_mode = 3
+set gps_gnss_mode 3
 
 # Mode 4: GPS + BeiDou (optimized for Asia-Pacific)
-set gps_gnss_mode = 4
+set gps_gnss_mode 4
 
 # Mode 5: All constellations (maximum satellites, best accuracy)
-set gps_gnss_mode = 5
+set gps_gnss_mode 5
 
 save
 reboot
@@ -127,10 +124,10 @@ reboot
 
 ```
 # Enable L1+L5 dual-band on M10 (better multipath rejection)
-set gps_enable_dual_band = 1
+set gps_enable_dual_band 1
 
 # Disable dual-band (force L1 only for compatibility)
-set gps_enable_dual_band = 0
+set gps_enable_dual_band 0
 
 save
 reboot
@@ -141,15 +138,15 @@ reboot
 
 #### Individual Constellation Control
 
-When `gps_gnss_mode = 0`, you can enable/disable each constellation individually:
+When `gps_gnss_mode 0`, you can enable/disable each constellation individually:
 
 ```
-set gps_enable_gps = 1         # GPS (USA)
-set gps_enable_glonass = 1     # GLONASS (Russia)
-set gps_enable_galileo = 1     # Galileo (EU)
-set gps_enable_beidou = 1      # BeiDou (China)
-set gps_enable_qzss = 1        # QZSS (Japan/Asia-Pacific)
-set gps_enable_sbas = 1        # SBAS/WAAS/EGNOS augmentation
+set gps_enable_gps 1         # GPS (USA)
+set gps_enable_glonass 1     # GLONASS (Russia)
+set gps_enable_galileo 1     # Galileo (EU)
+set gps_enable_beidou 1      # BeiDou (China)
+set gps_enable_qzss 1        # QZSS (Japan/Asia-Pacific)
+set gps_enable_sbas 1        # SBAS/WAAS/EGNOS augmentation
 
 save
 reboot
@@ -159,62 +156,57 @@ reboot
 
 #### Maximum Accuracy (M10 Recommended)
 ```
-set gps_gnss_mode = 5              # All constellations
-set gps_enable_dual_band = 1       # L1+L5 dual-band
+set gps_gnss_mode 5              # All constellations
+set gps_enable_dual_band 1       # L1+L5 dual-band
 save
 reboot
 ```
 **Result:** GPS+GLONASS+Galileo+BeiDou+QZSS+SBAS with L1+L5  
-**Use case:** Long range, precision missions, RTH  
 **Power:** High
 
 #### Balanced Performance (M10)
 ```
-set gps_gnss_mode = 3              # GPS + Galileo
-set gps_enable_dual_band = 1       # L1+L5 for multipath rejection
+set gps_gnss_mode 3              # GPS + Galileo
+set gps_enable_dual_band 1       # L1+L5 for multipath rejection
 save
 reboot
 ```
 **Result:** GPS+Galileo with L1+L5  
-**Use case:** Racing, FPV, general flying  
 **Power:** Medium
 
 #### Battery Saver (Any Module)
 ```
-set gps_gnss_mode = 1              # GPS only
-set gps_enable_dual_band = 0       # L1 only
+set gps_gnss_mode 1              # GPS only
+set gps_enable_dual_band 0       # L1 only
 save
 reboot
 ```
 **Result:** GPS only, L1 band  
-**Use case:** Endurance flights, minimal GPS needed  
 **Power:** Low
 
 #### Urban/City Flying (M10)
 ```
-set gps_gnss_mode = 3              # GPS + Galileo
-set gps_enable_dual_band = 1       # L5 rejects building reflections
+set gps_gnss_mode 3              # GPS + Galileo
+set gps_enable_dual_band 1       # L5 rejects building reflections
 save
 reboot
 ```
 **Result:** GPS+Galileo with L1+L5  
-**Use case:** Urban environments, buildings  
 **Power:** Medium
 
 #### Asia-Pacific Optimized (M10)
 ```
-set gps_gnss_mode = 0              # Custom mode
-set gps_enable_gps = 1
-set gps_enable_galileo = 1
-set gps_enable_beidou = 1          # Strong in Asia
-set gps_enable_qzss = 1            # Regional augmentation
-set gps_enable_glonass = 0         # Disable to save power
-set gps_enable_dual_band = 1
+set gps_gnss_mode 0              # Custom mode
+set gps_enable_gps 1
+set gps_enable_galileo 1
+set gps_enable_beidou 1          # Strong in Asia
+set gps_enable_qzss 1            # Regional augmentation
+set gps_enable_glonass 0         # Disable to save power
+set gps_enable_dual_band 1
 save
 reboot
 ```
 **Result:** GPS+Galileo+BeiDou+QZSS with L1+L5  
-**Use case:** Japan, Australia, SE Asia  
 **Power:** Medium
 
 ### Verification
@@ -240,34 +232,11 @@ GPS UBX                      # UBX protocol enabled
 GPS NAV5                     # Navigation mode: Airborne
 ```
 
-### GPS Features
-
-#### Return to Home (RTH)
-- Home position automatically set on first arm (if `gps_auto_set_home = 1`)
-- Distance and bearing to home calculated continuously
-- Available via telemetry (CRSF, etc.)
-
-#### Failsafe GPS Rescue
-Configure GPS rescue parameters:
-
-```
-set gps_rescue_min_sats = 8        # Minimum satellites for rescue
-set gps_rescue_altitude = 50       # Rescue altitude in meters
-set gps_rescue_min_distance = 10   # Minimum distance to activate (meters)
-set gps_rescue_ground_speed = 5    # Target ground speed (m/s)
-set gps_rescue_max_angle = 45      # Maximum tilt angle (degrees)
-
-save
-```
-
-> [!NOTE]
-> GPS Rescue feature requires GPS fix with sufficient satellites before arming.
-
 ### Troubleshooting
 
 #### No GPS Fix
 1. Check antenna has clear sky view (away from carbon fiber, metal)
-2. Enable more constellations: `set gps_gnss_mode = 5`
+2. Enable more constellations: `set gps_gnss_mode 5`
 3. Wait 2-3 minutes for initial fix (TTFF - Time To First Fix)
 4. Verify baud rate matches GPS module (115200 or 230400)
 
@@ -279,43 +248,22 @@ save
 
 #### Low Satellite Count
 1. Move to open area with clear sky view
-2. Enable all constellations: `set gps_gnss_mode = 5`
+2. Enable all constellations: `set gps_gnss_mode 5`
 3. Check antenna connection
 4. Wait longer for satellites to be acquired
 
 #### M10 Not Using Dual-Band
 1. Verify module is actually M10 (check boot log: `GPS VER: 000A0000`)
-2. Ensure `gps_enable_dual_band = 1`
+2. Ensure `gps_enable_dual_band 1` is set
 3. Check log for `GPS GNSS L1+L5` (not just `L1`)
 4. Some M10 modules need firmware update for L5 support
 
 #### Slow Fix Time
-1. Enable more constellations: `set gps_gnss_mode = 5`
-2. Ensure SBAS is enabled: `set gps_enable_sbas = 1`
+
+1. Enable more constellations: `set gps_gnss_mode 5`
+2. Ensure SBAS is enabled: `set gps_enable_sbas 1`
 3. Check for clear sky view (no buildings, trees blocking)
 4. First fix always takes longer (cold start), subsequent fixes are faster
-
-### Performance Tips
-
-**For Maximum Accuracy:**
-- Use M10 module with all constellations and dual-band
-- 230400 baud for 25Hz update rate
-- Clear antenna placement
-
-**For Battery Life:**
-- GPS-only mode (`gps_gnss_mode = 1`)
-- L1 single-band (`gps_enable_dual_band = 0`)
-- Lower update rate (115200 baud, 10Hz)
-
-**For Urban Flying:**
-- Enable dual-band on M10 (L5 rejects multipath)
-- GPS + Galileo mode (best urban accuracy)
-- Position antenna away from carbon fiber
-
-**For Fast Fix:**
-- Enable all constellations
-- Ensure SBAS enabled
-- Keep GPS powered between flights (warm start)
 
 ## Motor setup
 

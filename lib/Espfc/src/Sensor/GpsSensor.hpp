@@ -21,22 +21,16 @@ public:
 
 private:
   void calculateHomeVector() const;
-  void setHomePosition() const;
-  bool shouldSetHome() const;
-  
-  static float haversineDistance(int32_t lat1, int32_t lon1, 
-                                  int32_t lat2, int32_t lon2);
-  static int16_t calculateBearing(int32_t lat1, int32_t lon1,
-                                  int32_t lat2, int32_t lon2);
-  
+
   enum State {
     DETECT_BAUD,
     SET_BAUD,
+    DISABLE_NMEA,
     GET_VERSION,
-    CONFIGURE_GNSS,
     ENABLE_UBX,
     ENABLE_NAV5,
     ENABLE_SBAS,
+    CONFIGURE_GNSS,
     SET_RATE,
     WAIT,
     RECEIVE,
@@ -46,6 +40,7 @@ private:
   void handle();
 
   bool processUbx(uint8_t c);
+  void processNmea(uint8_t c);
   void setBaud(int baud);
 
   void onMessage();
@@ -56,7 +51,7 @@ private:
     Gps::UbxFrame<MsgType> frame{m};
     const uint8_t* ptr = reinterpret_cast<const uint8_t*>(&frame);
     _port->write(ptr, sizeof(frame));
-    
+
     setState(WAIT, ackState, timeoutState);
   }
 
@@ -85,6 +80,9 @@ private:
 
   Gps::UbxParser _ubxParser;
   Gps::UbxMessage _ubxMsg;
+
+  Gps::NmeaParser _nmeaParser;
+  Gps::NmeaMessage _nmeaMsg;
 
   Device::SerialDevice* _port;
   Utils::Timer _timer;
