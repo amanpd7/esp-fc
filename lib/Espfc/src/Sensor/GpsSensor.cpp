@@ -395,7 +395,7 @@ void GpsSensor::configureGnss()
   if (enableSBAS) _model.logger.info().log(F("SBAS"));
   _model.logger.info().logln(F("]"));
 
-  send(gnss, SET_RATE);
+  send(gnss, SET_RATE, SET_RATE); // on NAK (CFG-GNSS deprecated >PROTVER 23.01), skip to SET_RATE instead of ERROR
 }
 
 void GpsSensor::calculateHomeVector() const
