@@ -281,15 +281,15 @@ struct UbxCfgValsetKV
   uint8_t  value;
 } __attribute__((packed));
 
-// CFG-VALSET payload: 6 constellation ENA keys + 2 dual-band signal keys (GPS_L5, BDS_B2A)
-class UbxCfgValsetSignal
+template<size_t Size>
+class UbxCfgValset
 {
 public:
   static constexpr MsgId ID = UBX_CFG_VALSET;
   uint8_t version;      // 0
-  uint8_t layers;       // 0x07 = RAM + BBR + Flash
+  uint8_t layers;       // 0x01 = RAM only
   uint8_t reserved[2];
-  UbxCfgValsetKV kv[8]; // GPS, SBAS, GAL, BDS, QZSS, GLO, GPS_L5, BDS_B2A
+  UbxCfgValsetKV kv[Size];
 } __attribute__((packed));
 
 class UbxCfgNav5

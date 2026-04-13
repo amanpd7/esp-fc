@@ -328,8 +328,7 @@ void GpsSensor::handleError() const
 
 void GpsSensor::configureGnssValset()
 {
-  const auto version = _model.state.gps.support.version;
-  const bool useDualBand = (_model.config.gps.enableDualBand && version == GPS_M10);
+  const bool useDualBand = _model.config.gps.enableDualBand && _model.state.gps.support.dualBand;
 
   bool enableGPS  = _model.config.gps.enableGPS;
   bool enableGLO  = _model.config.gps.enableGLONASS;
@@ -347,9 +346,9 @@ void GpsSensor::configureGnssValset()
     case 5: enableGPS = enableGLO = enableGAL = enableBDS = enableQZSS = true; break;
   }
 
-  Gps::UbxCfgValsetSignal msg{};
+  Gps::UbxCfgValset<8> msg{};
   msg.version = 0;
-  msg.layers  = 0x07; // RAM + BBR + Flash
+  msg.layers  = 0x01; // RAM only
   msg.kv[0] = { Gps::CFG_SIGNAL_GPS_ENA,  (uint8_t)(enableGPS  ? 1 : 0) };
   msg.kv[1] = { Gps::CFG_SIGNAL_SBAS_ENA, (uint8_t)(enableSBAS ? 1 : 0) };
   msg.kv[2] = { Gps::CFG_SIGNAL_GAL_ENA,  (uint8_t)(enableGAL  ? 1 : 0) };
@@ -375,7 +374,7 @@ void GpsSensor::configureGnssValset()
 
 void GpsSensor::configureGnss()
 {
-  if (_model.state.gps.support.protVerMajor > 23)
+  if (_model.state.gps.support.protVerMajor >= 27)
   {
     configureGnssValset();
     return;
