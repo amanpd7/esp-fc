@@ -43,7 +43,8 @@ enum MsgId: uint16_t
   UBX_CFG_RATE     = 0x08 << 8 | UBX_CFG,  // Navigation/measurement rate settings
   UBX_CFG_SBAS     = 0x16 << 8 | UBX_CFG,  // SBAS configuration
   UBX_CFG_NAV5     = 0x24 << 8 | UBX_CFG,  // Navigation engine settings
-  UBX_CFG_GNSS     = 0x3E << 8 | UBX_CFG,  // GNSS system configuration
+  UBX_CFG_GNSS     = 0x3E << 8 | UBX_CFG,  // GNSS system configuration (deprecated >PROTVER 23.01)
+  UBX_CFG_VALSET   = 0x8A << 8 | UBX_CFG,  // Configuration input (Generation 9+, replaces legacy CFG-* messages)
 
   UBX_NAV_HPOSECEF = 0x13 << 8 | UBX_NAV,  // High precision position solution in ECEF (28 Bytes)
   UBX_NAV_HPOSLLH  = 0x14 << 8 | UBX_NAV,  // High precision geodetic position solution (36 Bytes)
@@ -262,6 +263,33 @@ public:
   uint8_t numTrkChUse;
   uint8_t numConfigBlocks;
   UbxCfgGnssBlock blocks[7];
+} __attribute__((packed));
+
+// CFG-SIGNAL key IDs for UBX-CFG-VALSET (PROTVER > 23.01, u-blox Interface Description UBX-23001092)
+constexpr uint32_t CFG_SIGNAL_GPS_ENA  = 0x10310001; // GPS enable
+constexpr uint32_t CFG_SIGNAL_GPS_L5   = 0x10310004; // GPS L5 signal enable (M10 dual-band)
+constexpr uint32_t CFG_SIGNAL_SBAS_ENA = 0x10310020; // SBAS enable
+constexpr uint32_t CFG_SIGNAL_GAL_ENA  = 0x10310021; // Galileo enable
+constexpr uint32_t CFG_SIGNAL_BDS_ENA  = 0x10310022; // BeiDou enable
+constexpr uint32_t CFG_SIGNAL_QZSS_ENA = 0x10310024; // QZSS enable
+constexpr uint32_t CFG_SIGNAL_GLO_ENA  = 0x10310025; // GLONASS enable
+constexpr uint32_t CFG_SIGNAL_BDS_B2A  = 0x10310028; // BeiDou B2a signal enable (M10 dual-band)
+
+struct UbxCfgValsetKV
+{
+  uint32_t key;
+  uint8_t  value;
+} __attribute__((packed));
+
+// CFG-VALSET payload: 6 constellation ENA keys + 2 dual-band signal keys (GPS_L5, BDS_B2A)
+class UbxCfgValsetSignal
+{
+public:
+  static constexpr MsgId ID = UBX_CFG_VALSET;
+  uint8_t version;      // 0
+  uint8_t layers;       // 0x07 = RAM + BBR + Flash
+  uint8_t reserved[2];
+  UbxCfgValsetKV kv[8]; // GPS, SBAS, GAL, BDS, QZSS, GLO, GPS_L5, BDS_B2A
 } __attribute__((packed));
 
 class UbxCfgNav5

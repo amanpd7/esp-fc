@@ -2,6 +2,7 @@
 #include <GpsProtocol.hpp>
 #include <Arduino.h>
 #include <cmath>
+#include <cstdlib>
 #include <tuple>
 
 namespace Espfc::Sensor
@@ -325,8 +326,61 @@ void GpsSensor::handleError() const
   _model.state.gps.present = false;
 }
 
+void GpsSensor::configureGnssValset()
+{
+  const auto version = _model.state.gps.support.version;
+  const bool useDualBand = (_model.config.gps.enableDualBand && version == GPS_M10);
+
+  bool enableGPS  = _model.config.gps.enableGPS;
+  bool enableGLO  = _model.config.gps.enableGLONASS;
+  bool enableGAL  = _model.config.gps.enableGalileo;
+  bool enableBDS  = _model.config.gps.enableBeiDou;
+  bool enableQZSS = _model.config.gps.enableQZSS;
+  bool enableSBAS = _model.config.gps.enableSBAS;
+
+  switch (_model.config.gps.gnssMode)
+  {
+    case 1: enableGPS = true; enableGLO = enableGAL = enableBDS = enableQZSS = false; break;
+    case 2: enableGPS = enableGLO = true; enableGAL = enableBDS = enableQZSS = false; break;
+    case 3: enableGPS = enableGAL = true; enableGLO = enableBDS = enableQZSS = false; break;
+    case 4: enableGPS = enableBDS = true; enableGLO = enableGAL = enableQZSS = false; break;
+    case 5: enableGPS = enableGLO = enableGAL = enableBDS = enableQZSS = true; break;
+  }
+
+  Gps::UbxCfgValsetSignal msg{};
+  msg.version = 0;
+  msg.layers  = 0x07; // RAM + BBR + Flash
+  msg.kv[0] = { Gps::CFG_SIGNAL_GPS_ENA,  enableGPS  ? 1u : 0u };
+  msg.kv[1] = { Gps::CFG_SIGNAL_SBAS_ENA, enableSBAS ? 1u : 0u };
+  msg.kv[2] = { Gps::CFG_SIGNAL_GAL_ENA,  enableGAL  ? 1u : 0u };
+  msg.kv[3] = { Gps::CFG_SIGNAL_BDS_ENA,  enableBDS  ? 1u : 0u };
+  msg.kv[4] = { Gps::CFG_SIGNAL_QZSS_ENA, enableQZSS ? 1u : 0u };
+  msg.kv[5] = { Gps::CFG_SIGNAL_GLO_ENA,  enableGLO  ? 1u : 0u };
+  msg.kv[6] = { Gps::CFG_SIGNAL_GPS_L5,   useDualBand ? 1u : 0u };
+  msg.kv[7] = { Gps::CFG_SIGNAL_BDS_B2A,  useDualBand ? 1u : 0u };
+
+  _model.logger.info().log(F("GPS VALSET "));
+  if (useDualBand) _model.logger.info().log(F("L1+L5 "));
+  _model.logger.info().log(F("["));
+  if (enableGPS)  _model.logger.info().log(F("GPS "));
+  if (enableGLO)  _model.logger.info().log(F("GLO "));
+  if (enableGAL)  _model.logger.info().log(F("GAL "));
+  if (enableBDS)  _model.logger.info().log(F("BDS "));
+  if (enableQZSS) _model.logger.info().log(F("QZSS "));
+  if (enableSBAS) _model.logger.info().log(F("SBAS"));
+  _model.logger.info().logln(F("]"));
+
+  send(msg, SET_RATE, SET_RATE);
+}
+
 void GpsSensor::configureGnss()
 {
+  if (_model.state.gps.support.protVerMajor > 23)
+  {
+    configureGnssValset();
+    return;
+  }
+
   const auto version = _model.state.gps.support.version;
   const bool useDualBand = (_model.config.gps.enableDualBand && version == GPS_M10);
 
@@ -395,7 +449,7 @@ void GpsSensor::configureGnss()
   if (enableSBAS) _model.logger.info().log(F("SBAS"));
   _model.logger.info().logln(F("]"));
 
-  send(gnss, SET_RATE, SET_RATE); // on NAK (CFG-GNSS deprecated >PROTVER 23.01), skip to SET_RATE instead of ERROR
+  send(gnss, SET_RATE);
 }
 
 void GpsSensor::calculateHomeVector() const
@@ -562,6 +616,11 @@ void GpsSensor::checkSupport(const char *payload) const
   if (std::strstr(payload, "QZSS") != nullptr)
   {
     _model.state.gps.support.qzss = true;
+  }
+  const char* pv = std::strstr(payload, "PROTVER=");
+  if (pv != nullptr)
+  {
+    _model.state.gps.support.protVerMajor = (uint8_t)std::atoi(pv + 8);
   }
 }
 

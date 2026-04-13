@@ -64,6 +64,7 @@ private:
   void handleVersion() const;
   void checkSupport(const char* payload) const;
   void configureGnss();
+  void configureGnssValset();
 
   static constexpr uint32_t TIMEOUT = 300000;
   static constexpr uint32_t DETECT_TIMEOUT = 2200000;

@@ -360,6 +360,7 @@ struct GpsSupportState
   bool sbas = false;
   bool qzss = false;
   bool dualBand = false;
+  uint8_t protVerMajor = 0; // parsed from MON-VER "PROTVER=XX.XX" ext string
 };
 
 template<typename T>
