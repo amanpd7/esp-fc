@@ -350,14 +350,14 @@ void GpsSensor::configureGnssValset()
   Gps::UbxCfgValsetSignal msg{};
   msg.version = 0;
   msg.layers  = 0x07; // RAM + BBR + Flash
-  msg.kv[0] = { Gps::CFG_SIGNAL_GPS_ENA,  enableGPS  ? 1u : 0u };
-  msg.kv[1] = { Gps::CFG_SIGNAL_SBAS_ENA, enableSBAS ? 1u : 0u };
-  msg.kv[2] = { Gps::CFG_SIGNAL_GAL_ENA,  enableGAL  ? 1u : 0u };
-  msg.kv[3] = { Gps::CFG_SIGNAL_BDS_ENA,  enableBDS  ? 1u : 0u };
-  msg.kv[4] = { Gps::CFG_SIGNAL_QZSS_ENA, enableQZSS ? 1u : 0u };
-  msg.kv[5] = { Gps::CFG_SIGNAL_GLO_ENA,  enableGLO  ? 1u : 0u };
-  msg.kv[6] = { Gps::CFG_SIGNAL_GPS_L5,   useDualBand ? 1u : 0u };
-  msg.kv[7] = { Gps::CFG_SIGNAL_BDS_B2A,  useDualBand ? 1u : 0u };
+  msg.kv[0] = { Gps::CFG_SIGNAL_GPS_ENA,  (uint8_t)(enableGPS  ? 1 : 0) };
+  msg.kv[1] = { Gps::CFG_SIGNAL_SBAS_ENA, (uint8_t)(enableSBAS ? 1 : 0) };
+  msg.kv[2] = { Gps::CFG_SIGNAL_GAL_ENA,  (uint8_t)(enableGAL  ? 1 : 0) };
+  msg.kv[3] = { Gps::CFG_SIGNAL_BDS_ENA,  (uint8_t)(enableBDS  ? 1 : 0) };
+  msg.kv[4] = { Gps::CFG_SIGNAL_QZSS_ENA, (uint8_t)(enableQZSS ? 1 : 0) };
+  msg.kv[5] = { Gps::CFG_SIGNAL_GLO_ENA,  (uint8_t)(enableGLO  ? 1 : 0) };
+  msg.kv[6] = { Gps::CFG_SIGNAL_GPS_L5,   (uint8_t)(useDualBand ? 1 : 0) };
+  msg.kv[7] = { Gps::CFG_SIGNAL_BDS_B2A,  (uint8_t)(useDualBand ? 1 : 0) };
 
   _model.logger.info().log(F("GPS VALSET "));
   if (useDualBand) _model.logger.info().log(F("L1+L5 "));
